@@ -91,7 +91,7 @@ async fn talk(msg: &UpdateWithCx<Message>) -> Result<()> {
                    reply = format!("{}\nВпрочем, я от петуха другого и не ожидал услышать.", reply);
                }
 
-               msg.reply_to(chain.generate_str()).send().await?;
+               msg.reply_to(reply).send().await?;
                break;
            }
        }
