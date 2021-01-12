@@ -1,0 +1,21 @@
+[package]
+name = "versor"
+version = "0.1.0"
+authors = ["Quentin <Quentin Inkling>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+teloxide = "0.3.3"
+tokio = { version = "0.2", features = ["full"] }
+log = "0.4"
+pretty_env_logger = "0.4"
+dotenv = "0.15"
+markov = "1.1.0"
+unicode-segmentation = "1.7.1"
+rand = "0.8.1"
+json = "0.12.4"
+reqwest = "0.10.10"
+anyhow = "1.0"
+tempfile = "3.2.0"
