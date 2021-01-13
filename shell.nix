@@ -9,6 +9,7 @@ pkgs.mkShell {
     pkgs.cargo
     pkgs.pkg-config
     pkgs.openssl.dev
+    pkgs.llvm_10
 
 
     # keep this line if you use bash

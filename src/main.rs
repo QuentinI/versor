@@ -9,6 +9,8 @@ use anyhow::Result;
 use json;
 #[macro_use] extern crate log;
 
+mod redtube;
+
 fn get_chain(chat_id: i64) -> Result<Chain<String>> {
     let chain_path = format!("./.versor/markov/chains/{}.chain", chat_id);
     
@@ -104,6 +106,28 @@ async fn talk(msg: &UpdateWithCx<Message>) -> Result<()> {
 
 }
 
+async fn execute(msg: &UpdateWithCx<Message>) -> Result<()> {
+    if msg.update.text().unwrap_or_default().starts_with("py") {
+    }
+    Ok(())
+}
+
+async fn horny(msg: &UpdateWithCx<Message>) -> Result<()> {
+    if msg.update.text().unwrap_or_default() == "Я видел порно, которое начинается точно так же" {
+        if let Some(reply_to) = msg.update.reply_to_message() {
+            if let Some(searchtext) = reply_to.text() {
+                let req = redtube::SearchVideo::default().search(searchtext);
+                let res = req.execute().await?;
+                let url = res.get(0).map(|v| v.url.as_str().to_string()).unwrap_or_default();
+                if url.len() != 0 {
+                    msg.reply_to(url).send().await?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn run() {
     teloxide::enable_logging!();
 
@@ -120,6 +144,8 @@ async fn run() {
     teloxide::repl(bot, |message| async move {
         talk(&message).await;
         train(&message).await;
+        execute(&message).await;
+        horny(&message).await;
         ResponseResult::<()>::Ok(())
     })
     .await;
