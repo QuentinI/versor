@@ -1,8 +1,10 @@
 use std::any::Any;
 use std::fmt::Display;
+use std::marker::PhantomData;
 use url::{Url};
 use chrono::{ DateTime, Utc, Duration };
 use serde::{Serialize, Deserialize, Deserializer};
+use serde::de::{Visitor, IntoDeserializer};
 use anyhow::Result;
 use std::str::FromStr;
 
@@ -45,6 +47,62 @@ fn from_str<'de, T, D>(deserializer: D) -> Result<T, D::Error>
     T::from_str(&s).map_err(serde::de::Error::custom)
 }
 
+fn from_str_or_float<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+where
+    T: Deserialize<'de> + FromStr,
+    T::Err: Display,
+    D: Deserializer<'de>,
+{
+    // This is a Visitor that forwards string types to T's `FromStr` impl and
+    // forwards map types to T's `Deserialize` impl. The `PhantomData` is to
+    // keep the compiler from complaining about T being an unused generic type
+    // parameter. We need T in order to know the Value type for the Visitor
+    // impl.
+    struct StringOrStruct<T>(PhantomData<fn() -> T>);
+
+    impl<'de, T> Visitor<'de> for StringOrStruct<T>
+    where
+        T: Deserialize<'de> + FromStr,
+        T::Err: Display,
+    {
+        type Value = T;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("string or number")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<T, E>
+        where
+            E: serde::de::Error,
+        {
+            T::from_str(&value).map_err(serde::de::Error::custom)
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<T, E>
+        where
+            E: serde::de::Error,
+        {
+            Deserialize::deserialize(value.into_deserializer())
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<T, E>
+        where
+            E: serde::de::Error,
+        {
+            Deserialize::deserialize(value.into_deserializer())
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<T, E>
+        where
+            E: serde::de::Error,
+        {
+            Deserialize::deserialize(value.into_deserializer())
+        }
+    }
+
+    deserializer.deserialize_any(StringOrStruct(PhantomData))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Video {
     #[serde(deserialize_with = "from_str")]
@@ -59,13 +117,14 @@ pub struct Video {
     pub duration: Duration,
     pub embed_url: Url,
     pub publish_date: String,
-    #[serde(deserialize_with = "from_str")]
+    #[serde(deserialize_with = "from_str_or_float")]
     pub rating: f64,
     pub ratings: u64,
     pub tags: Vec<Tag>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")] 
 enum Period {
     Weekly,
     Monthly,
@@ -89,7 +148,8 @@ impl Display for Period {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")] 
 enum Ordering {
     MostViewed,
     Newest,
@@ -98,7 +158,7 @@ enum Ordering {
 
 impl Default for Ordering {
     fn default() -> Ordering {
-        Ordering::Rating
+        Ordering::MostViewed
     }
 }
 
@@ -173,22 +233,47 @@ struct SearchVideoResult {
 
 impl SearchVideo {
     pub async fn execute(&self) -> Result<Vec<Video>> {
-        let url = format!(
-            "{base}&output=json&search={search}&page={page}&tags[]={tags}&thumbsize={thumbsize}&category={category}&stars={stars}{ordering}&period={period}",
-            base = "https://api.redtube.com/?data=redtube.Videos.searchVideos",
-            search = self.search.clone().unwrap_or_default(),
-            page = self.page.unwrap_or(1),
-            tags = self.tags.clone().unwrap_or_default().join(","),
-            thumbsize = self.thumbsize.unwrap_or_default(),
-            category = self.category.clone().unwrap_or_default(),
-            stars = self.stars.clone().unwrap_or_default().join(","),
-            ordering = match self.ordering {
-                Some(ord) => format!("&ordering={}", ord),
-                None => String::new()
-            },
-            period = self.period.unwrap_or_default()
-        );
-        let response = reqwest::get(&url).await?.text().await?;
+        let page = self.page.unwrap_or(1);
+        let tags = self.tags.clone().unwrap_or_default().join(",");
+        let thumbsize = self.thumbsize.unwrap_or_default();
+        let stars = self.stars.clone().unwrap_or_default().join(",");
+
+        let client = reqwest::Client::new();
+        let mut req = client.get("https://api.redtube.com/?data=redtube.Videos.searchVideos&output=json");
+
+        if let Some(page) = self.page {
+            req = req.query(&[("page", page)]);
+        }
+
+        if let Some(search) = &self.search {
+            req = req.query(&[("search", search)]);
+        }
+
+        if let Some(tags) = &self.tags {
+            req = req.query(&[("tags", tags.join(","))]);
+        }
+
+        if let Some(thumbsize) = self.thumbsize {
+            req = req.query(&[("thumbsize", thumbsize)]);
+        }
+
+        if let Some(stars) = &self.stars {
+            req = req.query(&[("stars", stars.join(","))]);
+        }
+
+        if let Some(ordering) = self.ordering {
+            req = req.query(&[("ordering", ordering)]);
+        }
+
+        if let Some(period) = self.period {
+            req = req.query(&[("period", period)]);
+        }
+
+        let req = req.build()?;
+
+        trace!("Requesting video {}", req.url());
+
+        let response = client.execute(req).await?.text().await?;
         let videos: SearchVideoResult = serde_json::from_str(&response)?;
         Ok(videos.videos.into_iter().map(|it| it.video).collect())
     }

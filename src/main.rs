@@ -6,6 +6,7 @@ use std::path::Path;
 use std::fs::create_dir_all;
 use rand::prelude::*;
 use anyhow::Result;
+use futures::stream::FuturesUnordered;
 use json;
 #[macro_use] extern crate log;
 
@@ -142,10 +143,12 @@ async fn run() {
     let bot = Bot::from_env();
 
     teloxide::repl(bot, |message| async move {
-        talk(&message).await;
-        train(&message).await;
-        execute(&message).await;
-        horny(&message).await;
+        let futures = tokio::join!(
+            talk(&message),
+            train(&message),
+            execute(&message),
+            horny(&message)
+        );
         ResponseResult::<()>::Ok(())
     })
     .await;
