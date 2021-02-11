@@ -1,8 +1,7 @@
-use std::any::Any;
 use std::fmt::Display;
 use std::marker::PhantomData;
 use url::{Url};
-use chrono::{ DateTime, Utc, Duration };
+use chrono::{ Duration };
 use serde::{Serialize, Deserialize, Deserializer};
 use serde::de::{Visitor, IntoDeserializer};
 use anyhow::Result;
@@ -53,11 +52,6 @@ where
     T::Err: Display,
     D: Deserializer<'de>,
 {
-    // This is a Visitor that forwards string types to T's `FromStr` impl and
-    // forwards map types to T's `Deserialize` impl. The `PhantomData` is to
-    // keep the compiler from complaining about T being an unused generic type
-    // parameter. We need T in order to know the Value type for the Visitor
-    // impl.
     struct StringOrStruct<T>(PhantomData<fn() -> T>);
 
     impl<'de, T> Visitor<'de> for StringOrStruct<T>
@@ -233,10 +227,6 @@ struct SearchVideoResult {
 
 impl SearchVideo {
     pub async fn execute(&self) -> Result<Vec<Video>> {
-        let page = self.page.unwrap_or(1);
-        let tags = self.tags.clone().unwrap_or_default().join(",");
-        let thumbsize = self.thumbsize.unwrap_or_default();
-        let stars = self.stars.clone().unwrap_or_default().join(",");
 
         let client = reqwest::Client::new();
         let mut req = client.get("https://api.redtube.com/?data=redtube.Videos.searchVideos&output=json");

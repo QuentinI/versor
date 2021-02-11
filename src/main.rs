@@ -6,7 +6,6 @@ use std::path::Path;
 use std::fs::create_dir_all;
 use rand::prelude::*;
 use anyhow::Result;
-use futures::stream::FuturesUnordered;
 use json;
 #[macro_use] extern crate log;
 
