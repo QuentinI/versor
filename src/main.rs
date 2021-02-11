@@ -86,14 +86,7 @@ async fn talk(msg: &UpdateWithCx<Message>) -> Result<()> {
        for token in tokens {
            let mut reply = chain.generate_str_from_token(token);
 
-           
            if reply.len() > 0 {
-
-               // Annoy hellg1
-               if msg.update.from().map_or(0, |u| u.id) == 98241741 && thread_rng().gen_ratio(1, 2) {
-                   reply = format!("{}\nВпрочем, я от петуха другого и не ожидал услышать.", reply);
-               }
-
                msg.reply_to(reply).send().await?;
                break;
            }
