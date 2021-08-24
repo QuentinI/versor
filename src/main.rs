@@ -1,4 +1,4 @@
-use teloxide::prelude::*;
+use teloxide::{prelude::*, requests::ResponseResult};
 use dotenv::dotenv;
 use markov::Chain;
 use std::io::ErrorKind;
@@ -43,11 +43,11 @@ async fn save_chain(chain: Chain<String>, chat_id: i64) -> Result<()> {
     Ok(())
 }
 
-async fn train(msg: &UpdateWithCx<Message>) -> Result<()> {
+async fn train(msg: &UpdateWithCx<Bot, Message>) -> Result<()> {
     if let Some(doc) = msg.update.document() {
         let bot = Bot::from_env();
         let filepath = bot.get_file(doc.file_id.clone()).send().await?.file_path;
-        let url = format!("https://api.telegram.org/file/bot{}/{}", msg.bot.token(), filepath);
+        let url = format!("https://api.telegram.org/file/bot{}/{}", msg.requester.token(), filepath);
         let req = reqwest::get(&url).await?;
         let contents = req.text().await?;
         let data = json::parse(&contents)?;
@@ -69,9 +69,9 @@ async fn train(msg: &UpdateWithCx<Message>) -> Result<()> {
     Ok(())
 }
 
-async fn talk(msg: &UpdateWithCx<Message>) -> Result<()> {
+async fn talk(msg: &UpdateWithCx<Bot, Message>) -> Result<()> {
     let divisor: u32 = 20;
-    let id = msg.bot.get_me().send().await?.user.id;
+    let id = msg.requester.get_me().send().await?.user.id;
 
     if Some(id) == msg.update.reply_to_message().map(Message::from).flatten().map(|u| u.id)
        || (thread_rng().gen_ratio(1, divisor)) {
@@ -99,13 +99,7 @@ async fn talk(msg: &UpdateWithCx<Message>) -> Result<()> {
 
 }
 
-async fn execute(msg: &UpdateWithCx<Message>) -> Result<()> {
-    if msg.update.text().unwrap_or_default().starts_with("py") {
-    }
-    Ok(())
-}
-
-async fn horny(msg: &UpdateWithCx<Message>) -> Result<()> {
+async fn horny(msg: &UpdateWithCx<Bot, Message>) -> Result<()> {
     if msg.update.text().unwrap_or_default() == "Я видел порно, которое начинается точно так же" {
         if let Some(reply_to) = msg.update.reply_to_message() {
             if let Some(searchtext) = reply_to.text() {
@@ -138,7 +132,6 @@ async fn run() {
         let futures = tokio::join!(
             talk(&message),
             train(&message),
-            execute(&message),
             horny(&message)
         );
         ResponseResult::<()>::Ok(())
