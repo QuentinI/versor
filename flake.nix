@@ -9,16 +9,17 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
       in rec {
-        devShell = pkgs.mkShell {
-          buildInputs = [
-            pkgs.gcc
-            pkgs.glibc
-            pkgs.rustc
-            pkgs.cargo
-            pkgs.llvm_10
-            pkgs.pkg-config
-            pkgs.openssl.dev
+        devShell = pkgs.mkShell rec {
+          buildInputs = with pkgs; [
+            gcc
+            cargo
+            rustc
+            rustfmt
+            llvm_10
+            pkg-config
+            openssl.dev
           ];
+          LD_LIBRARY_PATH = builtins.foldl' (a: b: "${a}:${b}/lib") "" buildInputs;
         };
 
         defaultPackage = pkgs.rustPlatform.buildRustPackage rec {
