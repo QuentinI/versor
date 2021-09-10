@@ -2,17 +2,82 @@ use std::borrow::ToOwned;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use rand::{thread_rng, Rng};
-use serde::Serialize;
-use serde_json;
+use serde::{Serialize, Serializer};
+use serde::de::{Deserialize, Deserializer, SeqAccess, Visitor};
+use serde::ser::SerializeSeq;
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Chain {
     map: HashMap<Vec<Option<String>>, HashMap<Option<String>, usize>>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct SerializableChain {
-    map: Vec<(Vec<Option<String>>, Vec<(Option<String>, usize)>)>,
+impl Serialize for Chain {
+
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let map = &self.map;
+        let mut seq = serializer.serialize_seq(Some(map.len()))?;
+
+        for (k, v) in map {
+            let element = (
+                k.clone(),
+                v.iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect::<Vec<(Option<String>, usize)>>()
+            );
+            seq.serialize_element(&element)?;
+        }
+
+        seq.end()
+    }
+}
+
+struct ChainVisitor;
+
+type VecValue = (Vec<Option<String>>, Vec<(Option<String>, usize)>);
+
+impl<'de> Visitor<'de> for ChainVisitor {
+
+    type Value = Vec<VecValue>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(formatter, "a valid serailized chain")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let mut vec: Self::Value = Vec::new();
+        loop {
+            match seq.next_element::<VecValue>()? {
+                Some(value) => vec.push(value),
+                None => break,
+            }
+        }
+        Ok(vec)
+    }
+}
+
+impl<'de> Deserialize<'de> for Chain {
+
+    fn deserialize<D>(deserializer: D) -> Result<Chain, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let chain = Chain {
+            map: deserializer.deserialize_seq(ChainVisitor)?
+                .iter()
+                .map(|(k, v)| {
+                    let inner_map: HashMap<Option<String>, usize> = v.iter().map(|x| x.clone()).collect();
+                    (k.clone(), inner_map)
+                })
+                .collect()
+        };
+        Ok(chain)
+    }
 }
 
 impl Chain {
@@ -28,29 +93,11 @@ impl Chain {
     }
 
     pub fn save(&self) -> serde_json::Result<String> {
-        let serializable_chain = SerializableChain {
-            map: self.map
-                .iter()
-                .map(|(k, v)| 
-                    (k.clone(), v.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Vec<(Option<String>, usize)>>())
-                )
-                .collect()
-        };
-        serde_json::to_string(&serializable_chain)
+        serde_json::to_string(&self)
     }
 
     pub fn load(data: &str) -> serde_json::Result<Chain> {
-        let serializable_chain: SerializableChain = serde_json::from_str(&data)?;
-        let chain = Chain {
-            map: serializable_chain.map
-                .iter()
-                .map(|(k, v)| {
-                    let inner_map: HashMap<Option<String>, usize> = v.iter().map(|x| x.clone()).collect();
-                    (k.clone(), inner_map)
-                })
-                .collect()
-        };
-        Ok(chain)
+        serde_json::from_str(&data)
     }
 
     pub fn feed(&mut self, string: &str) -> &mut Chain {

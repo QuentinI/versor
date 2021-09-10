@@ -1,5 +1,3 @@
-#[macro_use]
-extern crate serde_derive;
 #[cfg(feature = "json")]
 extern crate serde_json;
 #[macro_use]
