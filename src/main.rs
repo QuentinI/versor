@@ -1,8 +1,6 @@
 #[cfg(feature = "json")]
 extern crate serde_json;
 #[macro_use]
-extern crate diesel;
-#[macro_use]
 extern crate log;
 extern crate rand;
 extern crate serde;
@@ -10,8 +8,6 @@ extern crate serde;
 pub mod cache;
 pub mod chain;
 pub mod communication;
-pub mod models;
-pub mod schema;
 pub mod settings;
 
 use std::sync::Arc;

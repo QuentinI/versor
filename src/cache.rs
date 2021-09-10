@@ -1,22 +1,16 @@
 use anyhow::Result;
-use diesel::{pg::PgConnection, prelude::*};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::fs;
 
 use crate::chain::Chain;
-use crate::models::{ChatChain, NewChatChain};
-use crate::schema::chat_chains::{columns, dsl::chat_chains};
 use crate::settings::Settings;
 
-fn establish_connection(url: &str) -> Arc<Mutex<PgConnection>> {
-    Arc::new(Mutex::new(
-        PgConnection::establish(url).expect(&format!("Error connecting to {}", url)),
-    ))
-}
+type ArcMutex<T> = Arc<Mutex<T>>;
 
 struct CounterChain {
     counter: u8,
-    chain: Arc<Mutex<Chain>>,
+    chain: ArcMutex<Chain>,
 }
 
 impl CounterChain {
@@ -31,8 +25,7 @@ impl CounterChain {
 
 #[derive(Clone)]
 pub struct ChainCache {
-    cache: Arc<Mutex<HashMap<i64, CounterChain>>>,
-    connection: Arc<Mutex<PgConnection>>,
+    cache: ArcMutex<HashMap<i64, CounterChain>>,
     cycle: u8,
 }
 
@@ -41,59 +34,44 @@ impl ChainCache {
     pub fn new(settings: &Settings) -> ChainCache {
         ChainCache {
             cache: Arc::new(Mutex::new(HashMap::new())),
-            connection: establish_connection(&settings.database.url),
             cycle: settings.constants.cache_cycle,
         }
     }
 
-    fn get_database(&self, chat_id: i64) -> Option<ChatChain> {
-        chat_chains
-            .filter(columns::chat_id.eq(chat_id))
-            .load::<ChatChain>(&*self.connection.lock().unwrap())
-            .expect("Error loading chain")
-            .into_iter()
-            .next()
+    fn file_name(chat_id: i64) -> String {
+        String::from(format!("./.chains/{}.json", chat_id))
     }
 
-    fn save_database(&self, chat_id: i64, chain: &Chain) -> Result<()> {
-        info!("Saving chain to a database for {}", chat_id);
+    fn get_file(&self, chat_id: i64) -> Option<String> {
+        fs::read_to_string(ChainCache::file_name(chat_id)).ok()
+    }
 
-        let chain = chain.save()?;
+    fn save_file(&self, chat_id: i64, chain: &Chain) -> Result<()> {
+        let file_name = ChainCache::file_name(chat_id);
+        info!("Saving chain to a file for {} into {}", chat_id, file_name);
 
-        diesel::insert_into(chat_chains)
-            .values(&NewChatChain::new(&chat_id, &chain))
-            .get_result::<ChatChain>(&*self.connection.lock().unwrap())
-            .expect("Error saving a chain");
+        let dir_path = std::path::Path::new(&file_name).parent().expect("Impossible");
 
-        info!("Saved chain to a database for {}", chat_id);
+        if !dir_path.exists() {
+            if let Err(e) = fs::create_dir_all(dir_path) {
+                error!("Couldn't create chain storage directory {}: {:?}", dir_path.display(), e);
+                return Err(e.into());
+            }
+        }
 
+        fs::write(ChainCache::file_name(chat_id), chain.save()?)?;
         Ok(())
     }
 
-    fn update_database(&self, chat_id: i64, chain: &Chain) -> Result<()> {
-        info!("Updating chain for {}", chat_id);
-
-        let chain = chain.save()?;
-
-        diesel::update(chat_chains.filter(columns::chat_id.eq(chat_id)))
-            .set(columns::chain.eq(&chain))
-            .get_result::<ChatChain>(&*self.connection.lock().unwrap())
-            .expect("Error saving a chain");
-
-        info!("Updated chain for {}", chat_id);
-
-        Ok(())
-    }
-
-    pub fn get_chain<'a>(&'a self, chat_id: i64) -> Result<Arc<Mutex<Chain>>> {
+    pub fn get_chain<'a>(&'a self, chat_id: i64) -> Result<ArcMutex<Chain>> {
         let mut cache = self.cache.lock().unwrap();
 
         if let Some(counter_chain) = cache.get_mut(&chat_id) {
             return Ok(counter_chain.chain.clone())
         };
 
-        let chain = match self.get_database(chat_id) {
-            Some(chain) => match Chain::load(&chain.chain) {
+        let chain = match self.get_file(chat_id) {
+            Some(data) => match Chain::load(&data) {
                 Ok(chain) => {
                     info!("Found a chain for {}", chat_id);
                     chain
@@ -106,7 +84,7 @@ impl ChainCache {
             None => {
                 info!("Inserting new chain in a database for {}", chat_id);
                 let chain = Chain::new();
-                self.save_database(chat_id, &chain)?;
+                self.save_file(chat_id, &chain)?;
                 chain
             }
 
@@ -125,7 +103,7 @@ impl ChainCache {
                 if counter_chain.counter == 0 {
                     counter_chain.counter = self.cycle;
                     let chain = counter_chain.chain.lock().unwrap();
-                    self.update_database(chat_id, &chain)
+                    self.save_file(chat_id, &chain)
                 } else {
                     counter_chain.counter -= 1;
                     Ok(())

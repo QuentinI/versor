@@ -2,11 +2,6 @@ use config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-pub struct Database {
-    pub url: String,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct Telegram {
     pub token: String,
     pub name: String,
@@ -19,10 +14,15 @@ pub struct Constants {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct Database {
+    pub options: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct Settings {
-    pub database: Database,
     pub telegram: Telegram,
     pub constants: Constants,
+    pub database: Database,
 }
 
 impl Settings {
