@@ -55,7 +55,7 @@ async fn train(
                 info!("Learning from {} messages", array.len());
                 for message in array.iter() {
                     if message["type"] == "message" {
-                        chain.feed_str(message["text"].as_str().unwrap_or_default());
+                        chain.feed(message["text"].as_str().unwrap_or_default());
                     }
                 }
     
@@ -93,7 +93,7 @@ async fn talk(
         {
             let chain = chain_cache.get_chain(msg.chat_id())?;
             let mut chain = chain.lock().unwrap();
-            chain.feed_str(msg.update.text().unwrap_or_default());
+            chain.feed(msg.update.text().unwrap_or_default());
 
             let mut tokens: Vec<&str> = msg.update.text().unwrap_or_default().split(" ").collect();
 

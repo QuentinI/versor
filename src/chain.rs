@@ -53,8 +53,9 @@ impl Chain {
         Ok(chain)
     }
 
-    pub fn feed<S: AsRef<[String]>>(&mut self, tokens: S) -> &mut Chain {
-        let tokens = tokens.as_ref();
+    pub fn feed(&mut self, string: &str) -> &mut Chain {
+        let tokens: Vec<String> = string.split(' ').map(|s| s.to_owned()).collect();
+
         if tokens.is_empty() {
             return self;
         }
@@ -76,27 +77,7 @@ impl Chain {
         self
     }
 
-    pub fn generate(&self) -> Vec<String> {
-        let mut ret = Vec::new();
-        let mut curs = vec![None; 1];
-
-        loop {
-            let next = self.map[&curs].next();
-            curs = curs[1..1].to_vec();
-            curs.push(next.clone());
-
-            if let Some(next) = next {
-                ret.push(next)
-            };
-
-            if curs[0].is_none() {
-                break;
-            }
-        }
-        ret
-    }
-
-    pub fn generate_from_token(&self, token: String) -> Vec<String> {
+    fn generate_from_token(&self, token: String) -> Vec<String> {
         let mut curs = vec![None; 0];
         curs.push(Some(token.clone()));
 
@@ -118,10 +99,6 @@ impl Chain {
             }
         }
         ret
-    }
-
-    pub fn feed_str(&mut self, string: &str) -> &mut Chain {
-        self.feed(&string.split(' ').map(|s| s.to_owned()).collect::<Vec<_>>())
     }
 
     pub fn generate_str_from_token(&self, string: &str) -> String {
