@@ -13,8 +13,7 @@ tokio-stream = "0.1.5"
 # config
 dotenv = "0.15"
 config = "0.11.0"
-serde = { version= "=1.0", features = ["derive"] }
-serde_derive = "=1.0"
+serde = "=1.0"
 serde_json = "1.0"
 
 # logging
@@ -22,7 +21,6 @@ log = "0.4"
 pretty_env_logger = "0.4"
 
 # other
-markov = "1.1"
 unicode-segmentation = "1.7"
 rand = "0.8"
 json = "0.12"
