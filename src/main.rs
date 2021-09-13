@@ -1,142 +1,62 @@
-use teloxide::{prelude::*, requests::ResponseResult};
-use dotenv::dotenv;
-use markov::Chain;
-use std::io::ErrorKind;
-use std::path::Path;
-use std::fs::create_dir_all;
-use rand::prelude::*;
-use anyhow::Result;
-use json;
-#[macro_use] extern crate log;
+#[cfg(feature = "json")]
+extern crate serde_json;
+#[macro_use]
+extern crate log;
+extern crate rand;
+extern crate serde;
 
-mod redtube;
+pub mod cache;
+pub mod chain;
+pub mod communication;
+pub mod settings;
 
-fn get_chain(chat_id: i64) -> Result<Chain<String>> {
-    let chain_path = format!("./.versor/markov/chains/{}.chain", chat_id);
-    
-    match Chain::load(chain_path.clone()) {
-        Ok(chain) => Ok(chain),
-        Err(err) => {
-            if err.kind() == ErrorKind::NotFound {
-                trace!("Creating new chain for chain {}", chat_id);
-                Ok(Chain::new())
-            } else {
-                error!("Couldn't load chain file for chain {}: {}", chat_id, chain_path);
-                Err(err.into())
-            }
-        }
-    }
-}
+use std::sync::Arc;
+use teloxide::{dispatching::*, prelude::*};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
-async fn save_chain(chain: Chain<String>, chat_id: i64) -> Result<()> {
-    let chain_path = format!("./.versor/markov/chains/{}.chain", chat_id);
-    let dir_path = Path::new(&chain_path).parent().expect("Impossible");
-
-    if !dir_path.exists() {
-        if let Err(e) = create_dir_all(dir_path) {
-            error!("Couldn't create chain storage directory {}: {:?}", dir_path.display(), e);
-            return Err(e.into());
-        }
-    }
-
-    chain.save(chain_path.clone())?;
-    Ok(())
-}
-
-async fn train(msg: &UpdateWithCx<Bot, Message>) -> Result<()> {
-    if let Some(doc) = msg.update.document() {
-        let bot = Bot::from_env();
-        let filepath = bot.get_file(doc.file_id.clone()).send().await?.file_path;
-        let url = format!("https://api.telegram.org/file/bot{}/{}", msg.requester.token(), filepath);
-        let req = reqwest::get(&url).await?;
-        let contents = req.text().await?;
-        let data = json::parse(&contents)?;
-        let messages = &data["messages"];
-        if let json::JsonValue::Array(array) = messages {
-            let mut chain = get_chain(msg.chat_id())?;
-
-            for message in array.iter() {
-                if message["type"] == "message" {
-                    chain.feed_str(message["text"].as_str().unwrap_or_default());
-                }
-            }
-
-            save_chain(chain, msg.chat_id()).await?;
-
-            msg.reply_to("Обучился").send().await?;
-        }
-    }
-    Ok(())
-}
-
-async fn talk(msg: &UpdateWithCx<Bot, Message>) -> Result<()> {
-    let divisor: u32 = 20;
-    let id = msg.requester.get_me().send().await?.user.id;
-
-    if Some(id) == msg.update.reply_to_message().map(Message::from).flatten().map(|u| u.id)
-       || (thread_rng().gen_ratio(1, divisor)) {
-       let mut chain = get_chain(msg.chat_id())?;
-
-       chain.feed_str(msg.update.text().unwrap_or_default());
-
-       let mut tokens: Vec<&str> = msg.update.text().unwrap_or_default().split(" ").collect();
-
-       tokens.shuffle(&mut thread_rng());
-       for token in tokens {
-           let mut reply = chain.generate_str_from_token(token);
-
-           if reply.len() > 0 {
-               msg.reply_to(reply).send().await?;
-               break;
-           }
-       }
-
-       save_chain(chain, msg.chat_id()).await?;
-    }
-
-    Ok(())
-    
-
-}
-
-async fn horny(msg: &UpdateWithCx<Bot, Message>) -> Result<()> {
-    if msg.update.text().unwrap_or_default() == "Я видел порно, которое начинается точно так же" {
-        if let Some(reply_to) = msg.update.reply_to_message() {
-            if let Some(searchtext) = reply_to.text() {
-                let req = redtube::SearchVideo::default().search(searchtext);
-                let res = req.execute().await?;
-                let url = res.get(0).map(|v| v.url.as_str().to_string()).unwrap_or_default();
-                if url.len() != 0 {
-                    msg.reply_to(url).send().await?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
+use crate::cache::ChainCache;
+use crate::communication::process_message;
+use crate::settings::Settings;
 
 async fn run() {
-    teloxide::enable_logging!();
+    dotenv::dotenv().ok();
+    let settings = match Settings::new() {
+        Ok(s) => Arc::new(s),
+        Err(r) => panic!("{}", r),
+    };
 
-    if let Err(err) = dotenv() {
-        if !err.not_found() {
-            error!("Failed to parse .env file");
-        }
-    }
+    teloxide::enable_logging_with_filter!(log::LevelFilter::Debug);
+    log::info!("Starting bot...");
 
-    log::info!("Starting dices_bot...");
+    let bot = teloxide::Bot::new(settings.telegram.token.clone());
+    let chain_cache = ChainCache::new(&settings);
+    let handler = Arc::new(process_message);
+    let cloned_bot = bot.clone();
 
-    let bot = Bot::from_env();
+    Dispatcher::new(bot.clone())
+        .messages_handler(move |rx: DispatcherHandlerRx<_, Message>| {
+            UnboundedReceiverStream::new(rx).for_each_concurrent(None, move |message| {
+                let handler = handler.clone();
+                let cloned_bot = cloned_bot.clone();
+                let settings = settings.clone();
+                let chain_cache = chain_cache.clone();
 
-    teloxide::repl(bot, |message| async move {
-        let futures = tokio::join!(
-            talk(&message),
-            train(&message),
-            horny(&message)
-        );
-        ResponseResult::<()>::Ok(())
-    })
-    .await;
+                async move {
+                    handler(cloned_bot, &message, settings, chain_cache)
+                        .await
+                        .log_on_error()
+                        .await;
+                }
+            })
+        })
+        .setup_ctrlc_handler()
+        .dispatch_with_listener(
+            update_listeners::polling_default(bot).await,
+            teloxide::error_handlers::LoggingErrorHandler::with_custom_text(
+                "An error from the update listener",
+            ),
+        )
+        .await;
 }
 
 #[tokio::main]

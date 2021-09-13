@@ -1,3 +1,4 @@
 /target
 .env
-.versor
+.chains
+config/develop.toml
